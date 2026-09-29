@@ -9,7 +9,7 @@
 
 A comprehensive architectural blueprint, hardware specification, and operational playbook for the **`AVK-Vault`** DIY Network-Attached Storage (NAS) and home server. 
 
-Built on a refurbished enterprise desktop platform for ~₹20,000, this system provides **8.2 TiB of pooled data storage**, snapshot parity protection, an NVMe-backed write cache, local DNS ad-blocking, smart home automation, high-performance photo management, and hardware-accelerated media streaming without vendor lock-in.
+Built on a refurbished enterprise desktop platform with a total investment of ~₹35,000 (including host system, NVMe cache, and 13 TB total raw enterprise disk storage), this system provides **8.2 TiB of pooled data storage**, snapshot parity protection, an NVMe-backed write cache, local DNS ad-blocking, smart home automation, high-performance photo management, and hardware-accelerated media streaming without vendor lock-in.
 
 ---
 
@@ -71,6 +71,7 @@ The build repurposes an enterprise business desktop, selected for its balance of
 | **Parity Drive** | 1× 4.0 TB HP Enterprise SATA HDD | Dedicated to SnapRAID parity (`snapraid.parity`) |
 | **Network (NIC)** | Intel I219-LM Gigabit Ethernet (`eno1`) | 1000BASE-T full-duplex wired LAN connection |
 | **Thermal Profile** | 27°C – 34°C across all spinning drives | 0 reallocated sectors across all disks via monitored SMART attributes |
+| **Total Investment** | ~₹35,000 (~$420 USD) | Complete build including host system, RAM, NVMe cache, and 4 enterprise HDDs |
 
 ---
 

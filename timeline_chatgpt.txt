@@ -10,7 +10,7 @@ The constraints and requirements we had established were roughly:
 
 | Item                            | Decision / requirement                                        |
 | ------------------------------- | ------------------------------------------------------------- |
-| Budget                          | ~₹20,000 for the initial NAS build                            |
+| Budget                          | ~₹35,000 for the total NAS build (including drives and host platform) |
 | Compute                         | Used business-class x86 desktop                               |
 | Candidate systems               | HP EliteDesk 800 G3 DM / Dell OptiPlex 5050 SFF               |
 | CPU generation                  | 7th-gen Intel platform                                        |
