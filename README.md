@@ -17,30 +17,30 @@ Built on a refurbished enterprise desktop platform for ~₹20,000, this system p
 
 ```mermaid
 graph TD
-    subgraph Client Access
-        LAN[Gigabit Home LAN<br/>192.168.0.0/24]
-        WAN[Tailscale Mesh VPN<br/>100.75.171.80]
+    subgraph Client_Access ["Client Access"]
+        LAN["Gigabit Home LAN<br/>192.168.0.0/24"]
+        WAN["Tailscale Mesh VPN<br/>100.75.171.80"]
     end
 
-    subgraph Host: HP EliteDesk 800 G3 TWR
-        OS[Debian 13 Trixie | Linux Kernel 7.0.x]
-        OMV[OpenMediaVault 8 Management Layer]
+    subgraph Host_System ["Host: HP EliteDesk 800 G3 TWR"]
+        OS["Debian 13 Trixie (Linux Kernel 7.0.x)"]
+        OMV["OpenMediaVault 8 Management Layer"]
 
-        subgraph Storage Engine
-            NVME[240 GB NVMe SSD<br/>Root OS & 150 GB Write Cache]
-            POOL[MergerFS Union Pool: mainstor<br/>/srv/mergerfs/mainstor — 8.2 TiB]
-            D1[(Data Disk 1<br/>3.0 TB ext4)]
-            D2[(Data Disk 2<br/>3.0 TB ext4)]
-            D3[(Data Disk 3<br/>3.0 TB ext4)]
-            PARITY[(Parity Disk<br/>4.0 TB SnapRAID)]
+        subgraph Storage_Engine ["Storage Engine"]
+            NVME["240 GB NVMe SSD<br/>Root OS & 150 GB Write Cache"]
+            POOL["MergerFS Union Pool: mainstor<br/>/srv/mergerfs/mainstor (8.2 TiB)"]
+            D1[("Data Disk 1<br/>3.0 TB ext4")]
+            D2[("Data Disk 2<br/>3.0 TB ext4")]
+            D3[("Data Disk 3<br/>3.0 TB ext4")]
+            PARITY[("Parity Disk<br/>4.0 TB SnapRAID")]
         end
 
-        subgraph Container Platform (Docker)
-            PIHOLE[Pi-hole v6<br/>DNS:53 | Web:8085]
-            HASS[Home Assistant<br/>Host Network :8123]
-            JELLY[Jellyfin Media<br/>Intel QuickSync :8096]
-            QBIT[qBittorrent<br/>Web:8080 | Torrent:6881]
-            IMMICH[Immich Photo Suite<br/>Vector Search & ML :2283]
+        subgraph Containers ["Container Platform (Docker)"]
+            PIHOLE["Pi-hole v6<br/>DNS:53 | Web:8085"]
+            HASS["Home Assistant<br/>Host Network :8123"]
+            JELLY["Jellyfin Media<br/>Intel QuickSync :8096"]
+            QBIT["qBittorrent<br/>Web:8080 | Torrent:6881"]
+            IMMICH["Immich Photo Suite<br/>Vector Search & ML :2283"]
         end
     end
 
@@ -129,11 +129,11 @@ During initial deployment, network file transfers between the client workstation
 
 ```mermaid
 flowchart LR
-    A[Initial Speed Cap:<br/>~94 Mbps / 11 MB/s] --> B[Diagnosis:<br/>ethtool showed 100BASE-TX negotiation]
-    B --> C[Root Cause:<br/>Defective wire pair termination in RJ45 plug]
-    C --> D[Action:<br/>Re-crimped cable to T568A standard]
-    D --> E[Result:<br/>Renegotiated to 1000BASE-T Full-Duplex]
-    E --> F[Benchmark Verification:<br/>iperf3 jumped from 94 Mbps to 930 Mbps]
+    A["Initial Speed Cap:<br/>~94 Mbps (11 MB/s)"] --> B["Diagnosis:<br/>ethtool showed 100BASE-TX negotiation"]
+    B --> C["Root Cause:<br/>Defective wire pair termination in RJ45 plug"]
+    C --> D["Action:<br/>Re-crimped cable to T568A standard"]
+    D --> E["Result:<br/>Renegotiated to 1000BASE-T Full-Duplex"]
+    E --> F["Benchmark Verification:<br/>iperf3 jumped from 94 Mbps to 930 Mbps"]
 ```
 
 * **Diagnosis**: Running `ethtool eno1` revealed the NIC had down-negotiated to 100BASE-TX full-duplex because of an open pair in the hand-made Ethernet cable.
@@ -148,20 +148,20 @@ Remote access is handled via Tailscale, avoiding public port forwarding on the h
 
 ```mermaid
 graph LR
-    subgraph Tailscale Network
-        ADMIN[Admin Nodes<br/>Kausthubh & Viswanath]
-        FAMILY[Family Nodes<br/>Viswanath, Akshatha, Rakshitha]
-        FRIENDS[Friend Nodes<br/>Gaurav]
+    subgraph Tailscale_Network ["Tailscale Network"]
+        ADMIN["Admin Nodes<br/>Kausthubh & Viswanath"]
+        FAMILY["Family Nodes<br/>Viswanath, Akshatha, Rakshitha"]
+        FRIENDS["Friend Nodes<br/>Gaurav"]
     end
 
-    subgraph NAS Services
-        SSH_OMV[Management<br/>SSH :22 | OMV :80]
-        SMB[Samba Shares<br/>Port :445]
-        MEDIA[Streaming<br/>Jellyfin :8096]
-        PHOTOS[Photo Suite<br/>Immich :2283]
+    subgraph NAS_Services ["NAS Services"]
+        SSH_OMV["Management<br/>SSH :22 | OMV :80"]
+        SMB["Samba Shares<br/>Port :445"]
+        MEDIA["Streaming<br/>Jellyfin :8096"]
+        PHOTOS["Photo Suite<br/>Immich :2283"]
     end
 
-    ADMIN -->|Unrestricted Access *:*| SSH_OMV
+    ADMIN -->|Unrestricted Access| SSH_OMV
     ADMIN -->|Full Access| SMB
     ADMIN -->|Full Access| MEDIA
     ADMIN -->|Full Access| PHOTOS
@@ -169,12 +169,12 @@ graph LR
     FAMILY -->|Allowed| SMB
     FAMILY -->|Allowed| MEDIA
     FAMILY -->|Allowed| PHOTOS
-    FAMILY -.->|BLOCKED| SSH_OMV
+    FAMILY -.->|Blocked| SSH_OMV
 
     FRIENDS -->|Allowed| SMB
     FRIENDS -->|Allowed| MEDIA
-    FRIENDS -.->|BLOCKED| PHOTOS
-    FRIENDS -.->|BLOCKED| SSH_OMV
+    FRIENDS -.->|Blocked| PHOTOS
+    FRIENDS -.->|Blocked| SSH_OMV
 ```
 
 * **Admins (`Kausthubh`, `Viswanath`)**: Unrestricted administrative access across SSH (`22`), OMV UI (`80`), Docker engine, and all internal ports.
@@ -257,12 +257,12 @@ Before any drive was introduced to the storage pool, it completed a rigorous dri
 
 ```mermaid
 flowchart TD
-    A[Physical Inspection<br/>Connectors, PCB, Serial Numbers] --> B[SMART Baseline<br/>Check Power-On Hours & Existing Attributes]
-    B --> C[Short SMART Self-Test<br/>smartctl -t short /dev/sdX]
-    C --> D[Extended SMART Self-Test<br/>smartctl -t long /dev/sdX]
-    D --> E[Full Surface Verification<br/>badblocks -wsv /dev/sdX]
-    E --> F[Memtest86+ Memory Verification<br/>24h Continuous Run]
-    F --> G[Deploy to Ext4 Pool]
+    A["Physical Inspection<br/>Connectors, PCB, Serial Numbers"] --> B["SMART Baseline<br/>Check Power-On Hours & Existing Attributes"]
+    B --> C["Short SMART Self-Test<br/>smartctl -t short /dev/sdX"]
+    C --> D["Extended SMART Self-Test<br/>smartctl -t long /dev/sdX"]
+    D --> E["Full Surface Verification<br/>badblocks -wsv /dev/sdX"]
+    E --> F["Memtest86+ Memory Verification<br/>24h Continuous Run"]
+    F --> G["Deploy to Ext4 Pool"]
 ```
 
 ### Key SMART Telemetry Tracked
