@@ -19,7 +19,7 @@ Built on a refurbished enterprise desktop platform for ~₹20,000, this system p
 graph TD
     subgraph Client_Access ["Client Access"]
         LAN["Gigabit Home LAN<br/>192.168.0.0/24"]
-        WAN["Tailscale Mesh VPN<br/>100.75.171.80"]
+        WAN["Tailscale Mesh VPN<br/>100.x.y.z"]
     end
 
     subgraph Host_System ["Host: HP EliteDesk 800 G3 TWR"]
@@ -125,7 +125,7 @@ Rather than traditional hardware RAID or rigid ZFS vdev striping, the storage su
 
 ## Physical Network Troubleshooting: The Gigabit Upgrade
 
-During initial deployment, network file transfers between the client workstation (`kblade`) and the NAS were mysteriously capped at ~94 Mbps (~11 MB/s):
+During initial deployment, network file transfers between the client workstation and the NAS were mysteriously capped at ~94 Mbps (~11 MB/s):
 
 ```mermaid
 flowchart LR
@@ -149,9 +149,9 @@ Remote access is handled via Tailscale, avoiding public port forwarding on the h
 ```mermaid
 graph LR
     subgraph Tailscale_Network ["Tailscale Network"]
-        ADMIN["Admin Nodes<br/>Kausthubh & Viswanath"]
-        FAMILY["Family Nodes<br/>Viswanath, Akshatha, Rakshitha"]
-        FRIENDS["Friend Nodes<br/>Gaurav"]
+        ADMIN["Admin Nodes<br/>Tier 1: Full Access"]
+        FAMILY["Internal Trusted Nodes<br/>Tier 2: Media & Storage"]
+        FRIENDS["External Guest Nodes<br/>Tier 3: Restricted Access"]
     end
 
     subgraph NAS_Services ["NAS Services"]
@@ -177,10 +177,10 @@ graph LR
     FRIENDS -.->|Blocked| SSH_OMV
 ```
 
-* **Admins (`Kausthubh`, `Viswanath`)**: Unrestricted administrative access across SSH (`22`), OMV UI (`80`), Docker engine, and all internal ports.
-* **Family (`Viswanath`, `Akshatha`, `Rakshitha`)**: Access restricted to SMB File Shares (`445`), Jellyfin (`8096`), and Immich Photos (`2283`).
-* **Friends (`Gaurav`)**: Strictly limited to SMB (`445`) and Jellyfin (`8096`); access to Immich photos and admin ports is completely blocked.
-* **LAN Gaming Exemption**: Incoming ports opened on workstation `kblade` allowing friends on the Tailnet to join locally hosted Minecraft servers (`100.102.208.110:25565`).
+* **Administrators (Tier 1)**: Unrestricted administrative access across SSH (`22`), OMV UI (`80`), Docker engine, and all internal ports.
+* **Family / Trusted Users (Tier 2)**: Access restricted to SMB File Shares (`445`), Jellyfin (`8096`), and Immich Photos (`2283`).
+* **Guest Users (Tier 3)**: Strictly limited to SMB (`445`) and Jellyfin (`8096`); access to Immich photos and admin ports is completely blocked.
+* **LAN Gaming Exemption**: Incoming ports opened on client workstation allowing peers on the Tailnet to join locally hosted game servers (Port `25565`).
 
 ---
 
@@ -190,14 +190,14 @@ OpenMediaVault manages native Linux system users, POSIX permissions, and Samba (
 
 ### Quota Allocations
 Filesystem-level `ext4` quotas are applied across the underlying pool disks:
-* **Gaurav**: Hard quota of **128 GB** (`134217728` KB) and soft limit of 120 GB.
-* **Family Members (`Kausthubh`, `Viswanath`, `Akshatha`, `Rakshitha`)**: Unlimited pool storage.
+* **Guest / Quota Users**: Hard quota of **128 GB** (`134217728` KB) and soft limit of 120 GB.
+* **Internal / Family Users**: Unlimited pool storage.
 
 ### Samba Share Structure
-* `kaust`: Private personal share for Kausthubh.
-* `Family`: Shared family directory accessible by Kausthubh, Viswanath, and Akshatha.
-* `Friends`: Shared folder for friends (Kausthubh, Gaurav, Rakshitha).
-* `vishu`, `akshatha`, `Gaurav`, `raks`: Private individual home shares.
+* `personal`: Private personal share for the primary system user.
+* `Family`: Shared internal directory accessible by family users.
+* `Friends`: Shared folder for peer and guest collaboration.
+* `user1`, `user2`, `guest_user`: Private individual home shares.
 * `jellyfin` & `torrents`: Dedicated media ingest and download directories.
 
 ---
@@ -287,4 +287,4 @@ AVK-Vault-NAS/
 
 ## License
 
-Personal home server architecture and documentation. Configured and documented by Kausthubh Viswanath.
+Personal home server architecture and documentation. Configured and maintained by the system administrator.

@@ -105,15 +105,15 @@ OpenMediaVault manages the native Linux users, groups, and Samba (`smbd`) shares
 
 ### Storage Quota Policy
 Ext4 quotas were configured directly on the underlying data disks:
-* **Gaurav**: Strict hard quota of **128 GB** (`134217728` KB) and soft limit of 120 GB across the data pool.
-* **Other Users (`Kausthubh`, `Viswanath`, `Akshatha`, `Rakshitha`)**: Unlimited storage.
+* **Guest / Quota Users**: Strict hard quota of **128 GB** (`134217728` KB) and soft limit of 120 GB across the data pool.
+* **Internal / Family Users**: Unlimited storage.
 
 ### Samba (SMB/CIFS) User Shares
 Shares are exposed over SMB with Network Recycle Bins (`.recycle`) and Apple macOS extensions (`fruit:aapl`):
-* `kaust`: Private personal share for Kausthubh.
-* `Family`: Shared family directory accessible by Kausthubh, Viswanath, and Akshatha.
-* `Friends`: Shared folder for friends (Kausthubh, Gaurav, Rakshitha).
-* `vishu`, `akshatha`, `Gaurav`, `raks`: Private individual home folders.
+* `personal`: Private personal share for the primary administrator.
+* `Family`: Shared family directory accessible by internal family members.
+* `Friends`: Shared folder for friends and guest collaboration.
+* `user1`, `user2`, `guest_user`: Private individual home folders.
 * `jellyfin` & `torrents`: Dedicated media and download ingest locations.
 
 ---
@@ -150,12 +150,12 @@ Shares are exposed over SMB with Network Recycle Bins (`.recycle`) and Apple mac
 * **Result**: The NIC immediately renegotiated to **1000 Mb/s (Gigabit)** full-duplex. Live `iperf3` benchmarks showed throughput rising from **94 Mbps to 930 Mbps** (~115 MB/s line-rate wire speed).
 
 ### Phase 3: Mesh VPN & Zero-Trust Access Control (Tailscale)
-* Integrated the NAS (`avk-vault` / `100.75.171.80`) and laptop (`kblade` / `100.102.208.110`) into Tailscale.
+* Integrated the NAS (`avk-vault` / `100.x.y.z`) and client workstation (`100.x.y.w`) into Tailscale.
 * Formulated a least-privilege Tailscale ACL policy:
-  * **Admins (`Kausthubh`, `Viswanath`)**: Unrestricted access to SSH (`22`), OMV UI (`80`), Docker, and all ports (`*:*`).
-  * **Family & Rakshitha**: Access restricted to SMB File Shares (`445`), Jellyfin (`8096`), and Immich Photos (`2283`).
-  * **Friends (`Gaurav`)**: Strictly restricted to SMB (`445`) and Jellyfin (`8096`); Immich photos and admin ports blocked.
-  * **Gaming Exception**: Opened all incoming ports on the laptop `kblade` so friends on the Tailnet can directly join hosted Minecraft servers (`100.102.208.110:25565`).
+  * **Admins**: Unrestricted access to SSH (`22`), OMV UI (`80`), Docker, and all ports (`*:*`).
+  * **Family / Trusted Users**: Access restricted to SMB File Shares (`445`), Jellyfin (`8096`), and Immich Photos (`2283`).
+  * **Guest Users**: Strictly restricted to SMB (`445`) and Jellyfin (`8096`); Immich photos and admin ports blocked.
+  * **Gaming Exception**: Opened incoming ports on client workstation so peers on the Tailnet can directly join hosted game servers (Port `25565`).
 
 ### Phase 4: Container Stack Expansion (Home Assistant & Pi-hole)
 1. **Home Assistant**:
@@ -186,7 +186,7 @@ Shares are exposed over SMB with Network Recycle Bins (`.recycle`) and Apple mac
 
 ## 5. Current Docker Container & Service Inventory
 
-All containers are managed under `/opt/<service>` using Docker Compose with `PUID=1000` (`Kausthubh`) and `PGID=100` (`users`):
+All containers are managed under `/opt/<service>` using Docker Compose with `PUID=1000` (`primary_user`) and `PGID=100` (`users`):
 
 | Service | Web UI / Port | Base Image | Role / Purpose |
 | :--- | :--- | :--- | :--- |
