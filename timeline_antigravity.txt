@@ -1,0 +1,212 @@
+Viewed nas_setup_summary.md:1-150
+
+# Build & Evolution of the `AVK-Vault` NAS
+
+This document details the architectural design, hardware specifications, software stack, and step-by-step evolution of the **`avk-vault`** NAS build. 
+
+*(All passwords, secrets, and private credentials have been strictly redacted).*
+
+---
+
+```
+                               ┌──────────────────────────────────────────────────────────┐
+                               │                    AVK-VAULT NAS                         │
+                               │          HP EliteDesk 800 G3 TWR | Debian 13             │
+                               └────────────────────────────┬─────────────────────────────┘
+                                                            │
+                     ┌──────────────────────────────────────┼──────────────────────────────────────┐
+                     │                                      │                                      │
+        ┌────────────▼────────────┐            ┌────────────▼────────────┐            ┌────────────▼────────────┐
+        │    STORAGE SUBSYSTEM    │            │    CONTAINER PLATFORM   │            │   NETWORKING & SECURITY │
+        │  MergerFS Union (8.2TB) │            │ Docker Engine & Compose │            │ Gigabit LAN (1000 Mb/s) │
+        │  SnapRAID Parity (4TB)  │            │ Jellyfin, Immich, HA,   │            │ Pi-hole DNS Ad-blocker  │
+        │  NVMe Mover Cache       │            │ qBittorrent             │            │ Tailscale Mesh VPN      │
+        └─────────────────────────┘            └─────────────────────────┘            └─────────────────────────┘
+```
+
+---
+
+## 1. Hardware Foundation & Physical Specifications
+
+The NAS was built on a refurbished enterprise desktop platform chosen for power efficiency, quiet operation, and multi-drive expansion:
+
+* **Chassis & Motherboard**: HP EliteDesk 800 G3 Tower (TWR).
+* **Processor (CPU)**: Intel Core i5-7500 @ 3.40 GHz (4 Cores / 4 Threads).
+  * *Advantage*: Intel HD Graphics 630 with QuickSync (`/dev/dri`) enables hardware-accelerated video transcoding for Jellyfin.
+* **System Memory**: 16 GB DDR4 RAM (~10 GB typically free for file system caching).
+* **Network Interface**: Intel Gigabit Ethernet NIC (`eno1`).
+* **Base Operating System**: **Debian GNU/Linux 13 (Trixie)** running Linux Kernel `7.0.x`.
+* **Management Layer**: **OpenMediaVault 8 (OMV 8)** with `omv-extras`.
+
+---
+
+## 2. Storage Subsystem & Drive Architecture
+
+The storage architecture was designed around **data safety, power efficiency, and JBOD flexibility** rather than traditional hardware RAID:
+
+```
+               ┌───────────────────────────────────────────────────────────┐
+               │              MergerFS Union Pool: mainstor                │
+               │            Mount: /srv/mergerfs/mainstor (8.2 TB)         │
+               └─────────────────────────────┬─────────────────────────────┘
+                                             │
+               ┌─────────────────────────────┼─────────────────────────────┐
+               │                             │                             │
+    ┌──────────▼───────────┐      ┌──────────▼───────────┐      ┌──────────▼───────────┐
+    │     Data Disk 1      │      │     Data Disk 2      │      │     Data Disk 3      │
+    │  3.0 TB HP Enterprise│      │  3.0 TB HP Enterprise│      │  3.0 TB HP Enterprise│
+    │   /dev/sdb1 (ext4)   │      │   /dev/sda1 (ext4)   │      │   /dev/sdc1 (ext4)   │
+    └──────────┬───────────┘      └──────────┬───────────┘      └──────────┬───────────┘
+               │                             │                             │
+               └─────────────────────────────┼─────────────────────────────┘
+                                             │ Protected by Snapshot Parity
+                                  ┌──────────▼───────────┐
+                                  │     Parity Disk      │
+                                  │  4.0 TB HP Enterprise│
+                                  │   /dev/sdd1 (ext4)   │
+                                  │  (snapraid.parity)   │
+                                  └──────────────────────┘
+```
+
+### Physical Drives & Layout
+1. **OS & System Drive (`/dev/nvme0n1`)**:
+   * 240 GB Lite-On NVMe SSD (`0020113000WH`).
+   * Hosts EFI, Debian root (`/`), and Docker container metadata.
+   * Hosts a 150 GB loop image (`/cache.img`) mounted at `/mnt/cache` for write caching.
+2. **Data Drives (3x 3.0 TB HDDs)**:
+   * `/dev/sda1` (`data2`), `/dev/sdb1` (`data1`), `/dev/sdc1` (`data3`).
+   * Formatted as native `ext4` filesystems with disk quota support (`usrquota,grpquota`).
+   * **Total Pool Storage**: **8.2 TiB**.
+3. **Parity Drive (1x 4.0 TB HDD)**:
+   * `/dev/sdd1` dedicated entirely to SnapRAID parity (`snapraid.parity`).
+   * *Rule fulfilled*: Parity disk (4.0 TB) is larger than the largest single data disk (3.0 TB).
+4. **Drive Health (SMART)**:
+   * Monitored across all 5 drives. Temperatures run between **27°C and 34°C** with **0 reallocated sectors**.
+
+### Why MergerFS + SnapRAID?
+* **Independent File Systems**: Each data disk has an ordinary, independent `ext4` filesystem. If two drives were to catastrophically fail, you only lose the data on those specific drives; the surviving drive can simply be plugged into any Linux PC and read normally (unlike striped RAID0/5/6 where total data loss occurs).
+* **Spindown & Power Savings**: Only the specific drive being read spins up. The other drives remain in low-power idle/standby.
+* **NVMe Write Cache & Mover**:
+  * Incoming writes hit the NVMe loop image at `/mnt/cache` for high speed.
+  * A background mover script (`/usr/local/bin/mover.sh`) runs via cron to transfer files to whichever HDD has the most free space via `rsync -aXR --remove-source-files`.
+
+### Automated SnapRAID Maintenance & Protection Guard
+To ensure parity never falls out of sync while protecting against accidental deletions:
+* We implemented an automated script: `/usr/local/bin/snapraid-auto-sync.sh`
+* Scheduled via cron: `0 3 * * * root /usr/local/bin/snapraid-auto-sync.sh` (daily at 3:00 AM).
+* **Delete Guard Safety Feature**: The script inspects deleted file counts before running `sync`. If more than **500 files** were deleted, the sync aborts and alerts, preventing a rogue script or disconnected drive from wiping parity data.
+* **Scrubbing**: Automatically performs an incremental 12% block scrub on every cycle.
+
+---
+
+## 3. User Governance, Shares & Storage Quotas
+
+OpenMediaVault manages the native Linux users, groups, and Samba (`smbd`) shares:
+
+### Storage Quota Policy
+Ext4 quotas were configured directly on the underlying data disks:
+* **Gaurav**: Strict hard quota of **128 GB** (`134217728` KB) and soft limit of 120 GB across the data pool.
+* **Other Users (`Kausthubh`, `Viswanath`, `Akshatha`, `Rakshitha`)**: Unlimited storage.
+
+### Samba (SMB/CIFS) User Shares
+Shares are exposed over SMB with Network Recycle Bins (`.recycle`) and Apple macOS extensions (`fruit:aapl`):
+* `kaust`: Private personal share for Kausthubh.
+* `Family`: Shared family directory accessible by Kausthubh, Viswanath, and Akshatha.
+* `Friends`: Shared folder for friends (Kausthubh, Gaurav, Rakshitha).
+* `vishu`, `akshatha`, `Gaurav`, `raks`: Private individual home folders.
+* `jellyfin` & `torrents`: Dedicated media and download ingest locations.
+
+---
+
+## 4. Chronological Evolution of the Build
+
+```
+                      EVOLUTION TIMELINE
+                      
+  1. Base Setup & Diagnostics  ──► Verified hardware, ext4 drives, SMART health
+              │
+  2. Cable & Network Fix       ──► Recrimped T568A: 100 Mbps bottleneck ➔ 1000 Mb/s Gigabit
+              │
+  3. Tailscale Mesh & ACLs     ──► Defined granular firewall rules for admins, family, and friends
+              │
+  4. Container Stack Cleanup   ──► Pruned legacy containers (dd-archive, threadfin, etc.)
+              │
+  5. Home Assistant Deployed   ──► Added smart home automation on host network (port 8123)
+              │
+  6. DNS Ad-Blocker Evolution  ──► AdGuard Home tested ➔ Upgraded to Pi-hole v6 (port 8085 / 53)
+              │
+  7. Protocol Trial (NFS vs SMB)──► Tested NFSv4; cleanly reverted to Samba for unified safety
+              │
+  8. Media Prep & Hardlink Ver ──► Standardized TV shows & verified zero-copy hardlinks for *arr stack
+```
+
+### Phase 1: Diagnostics & Base Configuration
+* Performed deep hardware and SMART drive inspection.
+* Removed orphaned containers (`dd-archive`, `threadfin`, `minecraft-server`) to recover resources and free ports.
+
+### Phase 2: Physical Network Troubleshooting (The Gigabit Upgrade)
+* **The Problem**: Initial speed tests between the laptop and the NAS capped at ~94 Mbps. The NIC negotiated down to 100 Mb/s BaseT due to a faulty pair termination in the physical Ethernet cable.
+* **The Fix**: The user re-crimped the RJ45 cable following the **T568A standard**.
+* **Result**: The NIC immediately renegotiated to **1000 Mb/s (Gigabit)** full-duplex. Live `iperf3` benchmarks showed throughput rising from **94 Mbps to 930 Mbps** (~115 MB/s line-rate wire speed).
+
+### Phase 3: Mesh VPN & Zero-Trust Access Control (Tailscale)
+* Integrated the NAS (`avk-vault` / `100.75.171.80`) and laptop (`kblade` / `100.102.208.110`) into Tailscale.
+* Formulated a least-privilege Tailscale ACL policy:
+  * **Admins (`Kausthubh`, `Viswanath`)**: Unrestricted access to SSH (`22`), OMV UI (`80`), Docker, and all ports (`*:*`).
+  * **Family & Rakshitha**: Access restricted to SMB File Shares (`445`), Jellyfin (`8096`), and Immich Photos (`2283`).
+  * **Friends (`Gaurav`)**: Strictly restricted to SMB (`445`) and Jellyfin (`8096`); Immich photos and admin ports blocked.
+  * **Gaming Exception**: Opened all incoming ports on the laptop `kblade` so friends on the Tailnet can directly join hosted Minecraft servers (`100.102.208.110:25565`).
+
+### Phase 4: Container Stack Expansion (Home Assistant & Pi-hole)
+1. **Home Assistant**:
+   * Installed in Docker (`/opt/homeassistant`) using `ghcr.io/home-assistant/home-assistant:stable`.
+   * Configured with `network_mode: host` to enable local device mDNS discovery (HomeKit, Sonos, Google Cast) and `/run/dbus` for Bluetooth support. Web dashboard on port `8123`.
+2. **DNS Ad-Blocking Evolution (AdGuard Home ➔ Pi-hole v6)**:
+   * First deployed AdGuard Home. Resolved a classic Linux hurdle: `systemd-resolved` was holding port 53 via its local stub listener (`127.0.0.53:53`). We safely disabled `DNSStubListener`, symlinked `/run/systemd/resolve/resolv.conf`, and freed `0.0.0.0:53`.
+   * Later, the user opted to switch from AdGuard to **Pi-hole v6**.
+   * Deployed `pihole/pihole:latest` on port `8085` (web admin) and port `53` (DNS) with `listeningMode: ALL` so Docker bridge NAT and LAN clients resolve seamlessly.
+   * Optimized the home router DHCP: Set primary DNS to `192.168.0.10`, secondary DNS empty (to prevent ad-leakage), and dynamic pool `192.168.0.25`–`192.168.0.254` to safeguard the static NAS reservation at `.10`.
+
+### Phase 5: File Protocol Trial & Reversion (NFS ➔ Samba)
+* Explored enabling NFS alongside Samba for Linux desktop performance.
+* Used OMV's internal RPC engine to generate `/export/<share>` bind mounts with unique filesystem IDs (`fsid`) for MergerFS compatibility.
+* Once tested and evaluated, the user chose to avoid multi-protocol complexity and revert back exclusively to Samba.
+* Safely dismantled the NFS exports, unmounted all `/export/*` bind mounts, and disabled `nfs-server` without touching the underlying data pool. Confirmed Samba CIFS mounts remained active and responsive.
+
+### Phase 6: Media Library Cleanup & Automation Stack Readiness
+* Reorganized media directory hierarchies:
+  * Restructured *House M.D.* from download staging into Jellyfin TV libraries.
+  * Extracted and formatted *Hanna* Seasons 1–3, stripping torrent scene tags and normalizing episode filenames into standard `SxxExx - Title.mkv` format.
+* **Atomic Hardlink Verification**:
+  * Tested hardlinks between `/srv/mergerfs/mainstor/torrents` and `/srv/mergerfs/mainstor/jellyfin`.
+  * **Result**: **SUCCESS** (identical device ID `50` and inode `675615427769144811`).
+  * Confirmed that automated ingest via Sonarr and Radarr can use atomic hardlinks instead of slow disk copies, allowing seeding to continue in qBittorrent with **zero duplicate disk space used**.
+
+---
+
+## 5. Current Docker Container & Service Inventory
+
+All containers are managed under `/opt/<service>` using Docker Compose with `PUID=1000` (`Kausthubh`) and `PGID=100` (`users`):
+
+| Service | Web UI / Port | Base Image | Role / Purpose |
+| :--- | :--- | :--- | :--- |
+| **OpenMediaVault** | `http://192.168.0.10:80` | Bare-metal | NAS management, Samba shares, and disk monitoring |
+| **Pi-hole** | `http://192.168.0.10:8085/admin` | `pihole/pihole:latest` | Network-wide ad & tracker blocking DNS server |
+| **Home Assistant** | `http://192.168.0.10:8123` | `home-assistant:stable` | Smart home automation (host network) |
+| **Jellyfin** | `http://192.168.0.10:8096` | `linuxserver/jellyfin` | Media streaming engine with QuickSync transcoding |
+| **qBittorrent** | `http://192.168.0.10:8080` | `linuxserver/qbittorrent` | BitTorrent client (Ports `6881` TCP/UDP) |
+| **Immich Suite** | `http://192.168.0.10:2283` | `immich-app/immich-server:v2` | High-performance self-hosted Google Photos alternative |
+| ↳ *PostgreSQL* | Internal (`5432`) | `postgres:14-vectorchord` | Vector search database for image embeddings |
+| ↳ *Machine Learning*| Internal | `immich-machine-learning:v2` | Facial recognition and CLIP semantic search |
+| ↳ *Redis Cache* | Internal (`6379`) | `valkey/valkey:9` | Job queue and session caching |
+
+---
+
+## 6. Key Architecture Lessons & Design Decisions
+
+1. **Ext4 + MergerFS over ZFS for Mixed Drives**:
+   * Mixing 3TB and 4TB drives would require strict vdev parity grouping in ZFS. MergerFS allows any combination of drive sizes to pool together and expand one disk at a time without re-striping.
+2. **Preventing Parity Corruption with Snapshot Guards**:
+   * Live parity (RAID5/6) updates immediately when files are deleted. If a user accidentally deletes a folder, parity updates instantly and data is lost. With SnapRAID, files are preserved until the next daily sync, and our `>500 files delete guard` prevents accidental parity overwrite.
+3. **Atomic Hardlinks Across Ingest & Media Libraries**:
+   * Because both `/srv/mergerfs/mainstor/torrents` and `/srv/mergerfs/mainstor/jellyfin` share the same underlying MergerFS mount point, the *Arr automation stack (Sonarr/Radarr) can link completed torrents instantly into Jellyfin without consuming additional storage or stressing HDD read/write heads.

@@ -1,0 +1,740 @@
+I can reconstruct the NAS project from the information retained from our earlier discussions. I do **not** have a complete searchable transcript of every past NAS message, so I won't invent hard-drive models, prices, or test results that aren't retained. The core decisions I have are enough to reconstruct the project and the build sequence.
+
+# NAS project — reconstructed timeline
+
+## Phase 0 — What you were trying to build
+
+The goal was a **low-cost home NAS** rather than buying a commercial Synology/QNAP system.
+
+The constraints and requirements we had established were roughly:
+
+| Item                            | Decision / requirement                                        |
+| ------------------------------- | ------------------------------------------------------------- |
+| Budget                          | ~₹20,000 for the initial NAS build                            |
+| Compute                         | Used business-class x86 desktop                               |
+| Candidate systems               | HP EliteDesk 800 G3 DM / Dell OptiPlex 5050 SFF               |
+| CPU generation                  | 7th-gen Intel platform                                        |
+| RAM                             | 16 GB DDR4                                                    |
+| Boot/system storage             | 256 GB NVMe                                                   |
+| Bulk storage                    | Start with roughly 2–4 TB HDDs                                |
+| Filesystem/storage architecture | **mergerfs + SnapRAID**                                       |
+| Expansion philosophy            | Start inexpensive and add HDDs later                          |
+| Intended use                    | Central home storage / NAS rather than compute-heavy server   |
+| Network                         | Existing home network initially, with room for later upgrades |
+| Remote access                   | Tailscale was already part of your home infrastructure        |
+
+The important architectural decision was **not to use RAID as the primary storage layer**. You were leaning toward:
+
+**mergerfs for pooling + SnapRAID for parity/protection.**
+
+That makes sense for a media/general-storage NAS where most files aren't changing constantly.
+
+---
+
+# Phase 1 — Choosing the computer
+
+We discussed two used-business-PC classes.
+
+### HP EliteDesk 800 G3 DM
+
+This is the very small "mini" form factor.
+
+Advantages:
+
+* Very compact
+* Low power consumption
+* Cheap used
+* Good Intel platform
+* NVMe capability
+* 16 GB DDR4 is straightforward
+* Excellent as a lightweight server
+
+The fundamental problem for the NAS project is **physical storage expansion**. A tiny business PC isn't a particularly good chassis for several 3.5-inch HDDs.
+
+So although the EliteDesk is attractive as a computer, it becomes awkward once the project turns into a multi-disk NAS.
+
+### Dell OptiPlex 5050 SFF
+
+The SFF machine is physically much larger.
+
+That matters much more for the NAS than raw CPU performance.
+
+Its advantages are the things we care about for this project:
+
+* More physical room
+* Better opportunity for internal HDD mounting
+* More practical SATA expansion
+* Standard-ish desktop components
+* Still inexpensive
+* 7th-generation Intel platform
+* Low enough power consumption for a home server
+
+### The important conclusion
+
+The CPU wasn't the limiting factor.
+
+For a NAS doing:
+
+* SMB/NFS
+* file serving
+* SnapRAID
+* mergerfs
+* Tailscale
+* basic Docker services
+
+a 7th-gen i5-class system is already more than adequate.
+
+The **chassis and storage connectivity** are more important.
+
+So the general design direction became:
+
+```text
+                 NAS
+                  │
+        ┌─────────┴─────────┐
+        │                   │
+     Compute             Storage
+        │                   │
+  7th-gen Intel       Multiple HDDs
+  16 GB DDR4          mergerfs
+  256 GB NVMe         SnapRAID
+```
+
+---
+
+# Phase 2 — Boot/system storage
+
+We separated the operating system from the bulk storage.
+
+The plan was:
+
+```text
+256 GB NVMe
+    │
+    └── Operating system
+        ├── Docker
+        ├── applications
+        ├── configuration
+        └── system files
+
+HDDs
+    │
+    └── NAS data
+```
+
+This is a good distinction because you don't want the NAS operating system competing with large media/file workloads on the same spinning disk.
+
+The NVMe also gives the machine substantially better responsiveness during:
+
+* boot
+* package installation
+* Docker/container operations
+* database access
+* logs
+* system updates
+
+The HDDs then remain dedicated to bulk data.
+
+---
+
+# Phase 3 — Why mergerfs + SnapRAID
+
+This was one of the major architectural decisions.
+
+## mergerfs
+
+mergerfs makes multiple independent disks appear as one pooled filesystem.
+
+For example:
+
+```text
+HDD 1 → /mnt/disk1
+HDD 2 → /mnt/disk2
+HDD 3 → /mnt/disk3
+```
+
+becomes something like:
+
+```text
+/mnt/storage
+```
+
+through mergerfs.
+
+So applications and network clients can see:
+
+```text
+NAS/
+├── Movies/
+├── TV/
+├── Documents/
+├── Backups/
+└── Photos/
+```
+
+instead of having to know which physical disk contains each folder.
+
+---
+
+## SnapRAID
+
+SnapRAID provides parity protection across the independent disks.
+
+Conceptually:
+
+```text
+Data disk 1 ─┐
+Data disk 2 ─┤
+Data disk 3 ─┼──→ SnapRAID parity
+Data disk 4 ─┘
+```
+
+The key difference from conventional RAID is that SnapRAID is primarily intended for **static or infrequently changing data**.
+
+That matches things like:
+
+* movies
+* music
+* archived photos
+* documents
+* backups
+* ISO collections
+
+much better than workloads involving huge amounts of constantly changing data.
+
+---
+
+# Phase 4 — Hard-drive selection
+
+The storage philosophy was **not simply "buy the biggest HDD possible."**
+
+The idea was to start economically with **2–4 TB drives**, then expand as the NAS becomes more useful.
+
+This is particularly appropriate for SnapRAID because the disks remain independent.
+
+For example, eventually you could have:
+
+```text
+4 TB
+4 TB
+6 TB
+6 TB
+8 TB
+```
+
+rather than being forced to buy five identical drives simultaneously.
+
+One major SnapRAID constraint is that the **parity disk needs to be at least as large as the largest data disk**.
+
+So drive selection needs to account for the eventual expansion path.
+
+For example:
+
+```text
+4 TB data
+4 TB data
+6 TB data
+6 TB parity
+```
+
+works.
+
+But:
+
+```text
+4 TB data
+4 TB data
+6 TB data
+4 TB parity
+```
+
+doesn't give you useful full parity coverage for the 6 TB disk.
+
+That means the eventual disk-size plan matters before buying drives.
+
+---
+
+# Phase 5 — HDD testing
+
+We also treated used HDDs differently from new ones.
+
+The basic principle was:
+
+**Never put a questionable HDD directly into the NAS and assume SMART means it's healthy.**
+
+For each drive, the workflow should be:
+
+```text
+Physical inspection
+       ↓
+Identify drive
+       ↓
+SMART health
+       ↓
+SMART attributes
+       ↓
+Short test
+       ↓
+Extended SMART test
+       ↓
+Read/write surface test
+       ↓
+Verify capacity
+       ↓
+Record results
+       ↓
+Only then deploy
+```
+
+### 5.1 Physical inspection
+
+Before installing:
+
+* check connector condition
+* check PCB for corrosion/damage
+* check the drive isn't excessively dented
+* listen for abnormal mechanical noises
+* record the serial number
+
+The serial number becomes useful for maintaining a drive inventory later.
+
+---
+
+## 5.2 SMART baseline
+
+On Linux, the primary tool is:
+
+```bash
+sudo smartctl -a /dev/sdX
+```
+
+You want to record things such as:
+
+```text
+SMART overall-health
+Power-on hours
+Reallocated sectors
+Current pending sectors
+Offline uncorrectable sectors
+UDMA CRC errors
+Temperature
+```
+
+Especially important:
+
+### Reallocated sectors
+
+A nonzero value is not automatically proof that a drive is dead, but it tells you the drive has already had sectors replaced.
+
+### Current pending sectors
+
+This is particularly concerning because the drive has sectors it currently cannot reliably read.
+
+### Offline uncorrectable
+
+Also important because it indicates sectors that couldn't be recovered.
+
+### UDMA CRC errors
+
+These aren't necessarily a disk problem. They can indicate:
+
+* bad SATA cable
+* connector problems
+* electrical interference
+
+So you have to interpret SMART attributes rather than blindly treating every nonzero number as a failed drive.
+
+---
+
+# Phase 6 — SMART testing
+
+After the initial SMART report:
+
+### Short test
+
+```bash
+sudo smartctl -t short /dev/sdX
+```
+
+Then:
+
+```bash
+sudo smartctl -a /dev/sdX
+```
+
+to inspect the result.
+
+For a more serious test:
+
+```bash
+sudo smartctl -t long /dev/sdX
+```
+
+The long test can take many hours depending on the capacity and model.
+
+The important thing is to let it finish.
+
+---
+
+# Phase 7 — Full surface testing
+
+For a drive whose history is uncertain, we wanted to go beyond SMART.
+
+A common Linux approach is `badblocks`.
+
+**Important:** the destructive write test erases the drive.
+
+For a drive that does not contain anything you need:
+
+```bash
+sudo badblocks -wsv /dev/sdX
+```
+
+That performs a destructive read/write verification.
+
+For a drive containing data you need to preserve, **do not run that command**.
+
+A safer read-only test is:
+
+```bash
+sudo badblocks -sv /dev/sdX
+```
+
+though it is less comprehensive than a destructive write/read cycle.
+
+For used drives, I'd personally test before deployment rather than trusting the seller's claim that a disk is "100% health."
+
+---
+
+# Phase 8 — Testing the NAS itself
+
+Once the hardware is assembled, the testing sequence should be:
+
+### Test 1 — Hardware
+
+Verify:
+
+```text
+BIOS
+CPU
+RAM
+NVMe
+HDDs
+SATA controllers
+network interface
+fans
+temperatures
+```
+
+Then boot Linux.
+
+---
+
+## Test 2 — RAM
+
+Because a NAS may run continuously, memory errors matter.
+
+A proper memory test should be performed before putting important data on the machine.
+
+Use something such as:
+
+```text
+Memtest86+
+```
+
+and allow a sufficiently long run rather than stopping after a few minutes.
+
+---
+
+## Test 3 — HDD identification
+
+Make sure Linux sees every disk:
+
+```bash
+lsblk
+```
+
+and:
+
+```bash
+sudo smartctl --scan
+```
+
+Then inspect each drive individually.
+
+This is where the serial numbers you recorded earlier become important.
+
+You don't want to accidentally format the wrong device.
+
+---
+
+# Phase 9 — Operating-system installation
+
+The 256 GB NVMe becomes the system drive.
+
+The broad structure would be:
+
+```text
+NVMe
+│
+├── /
+├── /var
+├── Docker/application storage
+└── OS configuration
+```
+
+The HDDs remain uncommitted until the storage design is finalized.
+
+This is important because you don't want to accidentally build the pool before deciding:
+
+* which disk is parity
+* which disks are data
+* which filesystem is used
+* what the SnapRAID configuration is
+
+---
+
+# Phase 10 — HDD filesystem layout
+
+With SnapRAID + mergerfs, the disks remain independently mounted.
+
+Conceptually:
+
+```text
+/mnt/disk1
+/mnt/disk2
+/mnt/disk3
+/mnt/parity
+```
+
+then:
+
+```text
+/mnt/storage
+```
+
+is the mergerfs pool.
+
+So:
+
+```text
+                   /mnt/storage
+                       │
+                   mergerfs
+              ┌────────┼────────┐
+              ↓        ↓        ↓
+           disk1     disk2     disk3
+           data      data      data
+
+                       +
+                  SnapRAID
+                       │
+                    parity
+```
+
+That's fundamentally different from putting the disks into a conventional RAID array.
+
+---
+
+# Phase 11 — Initial SnapRAID synchronization
+
+After the filesystems and pool are configured:
+
+1. Copy a small amount of test data.
+2. Confirm mergerfs behaves correctly.
+3. Run SnapRAID sync.
+4. Run a SnapRAID scrub/check.
+5. Simulate a recovery scenario before trusting the system with irreplaceable data.
+
+A critical concept here:
+
+**SnapRAID is not a backup.**
+
+It protects against certain disk failures, but it does not protect you from:
+
+* accidentally deleting a file
+* ransomware
+* corruption occurring before synchronization
+* fire
+* theft
+* catastrophic NAS failure
+
+So the eventual architecture should ideally be:
+
+```text
+NAS
+ │
+ ├── primary storage
+ │
+ ├── SnapRAID parity
+ │
+ └── separate backup
+```
+
+---
+
+# Phase 12 — Network/storage testing
+
+Once the NAS works locally, test it over the network.
+
+Test:
+
+### Sequential write
+
+Copy a large file:
+
+```text
+PC → NAS
+```
+
+### Sequential read
+
+Then:
+
+```text
+NAS → PC
+```
+
+You want to see whether the network, HDDs, or CPU becomes the limiting factor.
+
+Also test multiple simultaneous transfers.
+
+For example:
+
+```text
+PC 1 ─┐
+PC 2 ─┼──→ NAS
+Phone ─┤
+TV ────┘
+```
+
+This gives you a much more realistic picture than a single benchmark.
+
+---
+
+# Phase 13 — Tailscale
+
+Because you're already using Tailscale in your home environment, the NAS can eventually become another Tailscale node.
+
+Conceptually:
+
+```text
+Phone/Laptop
+      │
+   Internet
+      │
+   Tailscale
+      │
+      ↓
+     NAS
+```
+
+That allows remote access without exposing SMB directly to the public internet.
+
+I would specifically avoid forwarding SMB ports from the router to the NAS.
+
+---
+
+# Phase 14 — Final NAS structure
+
+The mature version of the system we were heading toward would look approximately like this:
+
+```text
+                    HOME NETWORK
+                         │
+              ┌──────────┴──────────┐
+              │                     │
+             LAN                 Tailscale
+              │                     │
+              └──────────┬──────────┘
+                         │
+                       NAS
+                         │
+            ┌────────────┴────────────┐
+            │                         │
+         NVMe SSD                  HDD pool
+            │                         │
+         Linux/OS                 mergerfs
+         Docker                      │
+         Services                ┌───┼───┐
+                                │   │   │
+                              HDD1 HDD2 HDD3
+                                   │
+                              SnapRAID
+                                   │
+                                parity
+```
+
+---
+
+# The chronological build plan
+
+If we actually execute the project from scratch, I'd do it in this order:
+
+| Stage | Work                              | Result                     |
+| ----- | --------------------------------- | -------------------------- |
+| 1     | Acquire NAS chassis               | SFF business PC            |
+| 2     | Install 16 GB RAM                 | Memory ready               |
+| 3     | Install 256 GB NVMe               | OS drive                   |
+| 4     | Install HDDs                      | Storage hardware           |
+| 5     | Record HDD serial numbers         | Drive inventory            |
+| 6     | SMART inspection                  | Initial health assessment  |
+| 7     | SMART short tests                 | Basic validation           |
+| 8     | SMART extended tests              | Deep drive validation      |
+| 9     | Surface testing                   | Detect problematic sectors |
+| 10    | Memtest                           | RAM validation             |
+| 11    | Install Linux                     | Base NAS                   |
+| 12    | Update/configure OS               | Stable server              |
+| 13    | Configure static network identity | Predictable NAS address    |
+| 14    | Install Docker/services           | Applications               |
+| 15    | Format/mount HDDs                 | Individual filesystems     |
+| 16    | Configure mergerfs                | Unified storage pool       |
+| 17    | Configure SnapRAID                | Parity protection          |
+| 18    | Perform initial sync              | Initial parity             |
+| 19    | Scrub/check                       | Verify consistency         |
+| 20    | SMB/NFS                           | Network file access        |
+| 21    | Large-file transfer test          | Throughput validation      |
+| 22    | Multiple-client test              | Load validation            |
+| 23    | Tailscale                         | Remote private access      |
+| 24    | Backup configuration              | Protection beyond parity   |
+| 25    | Simulated disk failure            | Recovery validation        |
+| 26    | Documentation                     | Final system record        |
+
+---
+
+# What I would consider the final acceptance test
+
+Before putting important data on it, I'd want the NAS to pass these:
+
+```text
+[ ] BIOS detects all hardware
+[ ] Memtest passes
+[ ] NVMe passes SMART
+[ ] HDD 1 passes testing
+[ ] HDD 2 passes testing
+[ ] HDD 3 passes testing
+[ ] ...all additional drives...
+[ ] No unexpected SMART errors
+[ ] All drives have recorded serial numbers
+[ ] OS stable
+[ ] Network stable
+[ ] mergerfs functional
+[ ] SnapRAID sync successful
+[ ] SnapRAID scrub/check successful
+[ ] SMB/NFS works
+[ ] Large file transfer tested
+[ ] Multi-client access tested
+[ ] Tailscale tested
+[ ] Backup tested
+[ ] Disk-failure recovery tested
+[ ] NAS documented
+```
+
+## One thing missing from my retained history
+
+I **don't have the exact HDD models/brands, quantities, individual prices, or the precise drive-testing results from those earlier NAS conversations** in the context available to me now. I do have the 2–4 TB starting-storage direction and the SnapRAID + mergerfs architecture.
+
+So I would not want to pretend, for example, that we previously chose a specific Seagate/WD/Toshiba model when I cannot verify that from the retained information. The same applies to the exact HP-vs-Dell conclusion if we had finalized one in a message that isn't retained.
+
+The overall project, however, can be reconstructed as above: **cheap 7th-gen business PC + 16 GB DDR4 + 256 GB NVMe + individually tested HDDs + mergerfs + SnapRAID, with incremental expansion and proper failure testing.**
+

@@ -1,0 +1,9 @@
+# OS & Editor artifacts
+*~
+*.swp
+.DS_Store
+Thumbs.db
+
+# Backup & Temp files
+*.bak
+*.tmp
